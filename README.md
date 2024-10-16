@@ -8,7 +8,7 @@
 https://github.com/user-attachments/assets/3e832c64-35c5-45fa-8af8-fbe54bdfbc07
 
 
-TL;DR: The proposed UniCon enables diverse generation behavior in one model for a targeted type of image pair.
+TL;DR: The proposed UniCon enables diverse generation behavior in one model for a target image-condition pair.
 
 <details><summary> Abstract </summary>
 
