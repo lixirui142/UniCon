@@ -4,7 +4,9 @@
 
 [**Project Page**](https://lixirui142.github.io/unicon-diffusion/) | [**Paper**](http://arxiv.org/abs/2410.11439)
 
-https://github.com/user-attachments/assets/abd7b5ab-8351-4794-9d9c-219d600e854f
+
+https://github.com/user-attachments/assets/3e832c64-35c5-45fa-8af8-fbe54bdfbc07
+
 
 TL;DR: The proposed UniCon enables diverse generation behavior in one model for a targeted type of image pair.
 
