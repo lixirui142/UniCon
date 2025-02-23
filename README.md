@@ -1,4 +1,4 @@
-## **UniCon: A Simple Approach to Unifying Diffusion-based Conditional Generation**
+## **UniCon: A Simple Approach to Unifying Diffusion-based Conditional Generation (ICLR 2025)**
 
 [Xirui Li](https://lixirui142.github.io/), [Charles Herrmann](https://scholar.google.com/citations?user=LQvi5XAAAAAJ&hl=en&oi=ao), [Kelvin C.K. Chan](https://ckkelvinchan.github.io/), [Yinxiao Li](https://research.google/people/yinxiaoli/?&type=google), [Deqing Sun](https://deqings.github.io/), [Chao Ma](https://vision.sjtu.edu.cn/), [Ming-Hsuan Yang](https://faculty.ucmerced.edu/mhyang/)<br>
 
