@@ -1,0 +1,10 @@
+*.safetensors
+*.pth
+
+output
+weights
+annotator/ckpts
+
+.ipynb_checkpoints
+__pycache__
+

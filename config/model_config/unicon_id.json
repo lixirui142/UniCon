@@ -1,0 +1,1 @@
+{"model_name": "id", "base_model_id": "runwayml/stable-diffusion-v1-5", "checkpoint_path": "weights/id", "post_joint": "conv", "trigger_word": "", "adapter_names": ["xy_lora", "yx_lora"]}

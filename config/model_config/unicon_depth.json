@@ -1,0 +1,1 @@
+{"model_name": "depth", "base_model_id": "runwayml/stable-diffusion-v1-5", "checkpoint_path": "weights/depth", "post_joint": "conv_fuse", "trigger_word": "depth_map, ", "adapter_names": ["xy_lora", "yx_lora", "y_lora"]}

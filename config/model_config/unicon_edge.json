@@ -1,0 +1,1 @@
+{"model_name": "edge", "base_model_id": "runwayml/stable-diffusion-v1-5", "checkpoint_path": "weights/edge", "post_joint": "conv_fuse", "trigger_word": "edge_map, ", "adapter_names": ["xy_lora", "yx_lora", "y_lora"]}
