@@ -1,0 +1,1 @@
+{"model_name": "appearance", "base_model_id": "runwayml/stable-diffusion-v1-5", "checkpoint_path": "weights/appearance", "post_joint": "conv", "trigger_word": "", "adapter_names": ["xy_lora", "yx_lora"]}
