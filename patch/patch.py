@@ -27,6 +27,10 @@ def _chunked_feed_forward(ff: nn.Module, hidden_states: torch.Tensor, chunk_dim:
 
 
 def lora_forward_hack(self):
+    """
+    Hack forward function of LoRA layers.
+    Let each adapter selectively applies to inputs specified by a mask.
+    """
     def forward(x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         if self.disable_adapters:
             if self.merged:
@@ -64,8 +68,8 @@ def lora_forward_hack(self):
 
 def make_diffusers_unicon_block(block_class: Type[torch.nn.Module]) -> Type[torch.nn.Module]:
     """
-    Make a patched class for a diffusers model.
-    This patch applies ToMe to the forward function of the block.
+    Make a class of UniCon blocks.
+    It adds joint cross attention to the forward function and enables related functions for initialzation and training.
     """
 
 
@@ -201,20 +205,20 @@ def make_diffusers_unicon_block(block_class: Type[torch.nn.Module]) -> Type[torc
             cross_attention_kwargs = cross_attention_kwargs.copy() if cross_attention_kwargs is not None else {}
             gligen_kwargs = cross_attention_kwargs.pop("gligen", None)
 
-            # pdb.set_trace()
-            # Clean version
+            # Joint cross attention
             if self.enable_joint_attention:
+                # Original self-attention
                 attn_output = self.attn1(
                     norm_hidden_states,
                     encoder_hidden_states=encoder_hidden_states if self.only_cross_attention else None,
                     attention_mask=attention_mask,
                     **cross_attention_kwargs,
                 )
+
+
                 joint_norm_hidden_states = norm_hidden_states
                 batch_size = joint_norm_hidden_states.shape[0]
-
                 
-
                 # Get paired joint cross attention inputs
                 x_ids, y_ids, x_weights, y_weights = self._unicon_config["attn_config"]
                 input_ids = torch.cat([x_ids, y_ids])
@@ -222,6 +226,7 @@ def make_diffusers_unicon_block(block_class: Type[torch.nn.Module]) -> Type[torc
                 input_norm_hidden_states = joint_norm_hidden_states[input_ids]
                 joint_norm_hidden_states = joint_norm_hidden_states[joint_ids]
 
+                # Attention
                 attn_output1n = self.attn1n(
                     input_norm_hidden_states,
                     encoder_hidden_states=joint_norm_hidden_states,
@@ -339,33 +344,13 @@ def apply_patch(
         train = False,
         name_skip = None):
     """
-    Patches a stable diffusion model with VidToMe.
-    Apply this to the highest level stable diffusion object (i.e., it should have a .model.diffusion_model).
+    Patches a diffusion model from diffusers with UniCon.
 
-    Important Args:
-     - model: A top level Stable Diffusion module to patch in place. Should have a ".model.diffusion_model"
-     - local_merge_ratio: The ratio of tokens to merge locally. I.e., 0.9 would merge 90% src tokens.
-              If there are 4 frames in a chunk (3 src, 1 dst), the compression ratio will be 1.3 / 4.0.
-              And the largest compression ratio is 0.25 (when local_merge_ratio = 1.0).
-              Higher values result in more consistency, but with more visual quality loss.
-     - merge_global: Whether or not to include global token merging.
-     - global_merge_ratio: The ratio of tokens to merge locally. I.e., 0.8 would merge 80% src tokens.
-                           When find significant degradation in video quality. Try to lower the value.
+    Args:
+     - model: A top level Stable Diffusion module to patch in place.
+     - train: Whether to train the model.
+     - name_skip: name for module you do not want to patch UniCon, e.g., name_skip="down_blocks" will skip the UNet encoder.
 
-    Args to tinker with if you want:
-     - max_downsample [1, 2, 4, or 8]: Apply VidToMe to layers with at most this amount of downsampling.
-                                       E.g., 1 only applies to layers with no downsampling (4/15) while
-                                       8 applies to all layers (15/15). I recommend a value of 1 or 2.
-     - seed: Manual random seed. 
-     - batch_size: Video batch size. Number of video chunks in one pass. When processing one video, it 
-                   should be 2 (cond + uncond) or 3 (when using PnP, source + cond + uncond).
-     - include_control: Whether or not to patch ControlNet model.
-     - align_batch: Whether or not to align similarity matching maps of samples in the batch. It should
-                    be True when using PnP as control.
-     - target_stride: Stride between target frames. I.e., when target_stride = 4, there is 1 target frame
-                      in any 4 consecutive frames. 
-     - global_rand: Probability in global token merging src/dst split. Global tokens are always src when
-                    global_rand = 1.0 and always dst when global_rand = 0.0 .
     """
 
     # Make sure the module is not currently patched
@@ -395,7 +380,7 @@ def apply_patch(
 
 def remove_patch(model: torch.nn.Module):
     """ Removes a patch from a ToMe Diffusion module if it was already patched. """
-    # For diffusers
+
 
     model = model.unet if hasattr(model, "unet") else model
     for _, module in model.named_modules():
@@ -406,8 +391,8 @@ def remove_patch(model: torch.nn.Module):
 
 
 def set_patch_lora_mask(model: torch.nn.Module, lora_name, lora_mask, kv_lora_mask = None):
-    """ Update arguments in patched modules """
-    # For diffusers
+    """ Set mask for LoRA layers"""
+
     model = model.unet if hasattr(model, "unet") else model
     qo_lora_mask = torch.tensor(lora_mask, dtype=torch.bool)
     kv_lora_mask = qo_lora_mask if kv_lora_mask is None else torch.tensor(kv_lora_mask, dtype=torch.bool)
@@ -423,8 +408,8 @@ def set_patch_lora_mask(model: torch.nn.Module, lora_name, lora_mask, kv_lora_ma
     return model
 
 def set_joint_layer_requires_grad(model: torch.nn.Module, adapter_names, requires_grad):
-    """ Update arguments in patched modules """
-    # For diffusers
+    """ Set requires_grad for all unicon parameters """
+
     model = model.unet if hasattr(model, "unet") else model
     for _, module in model.named_modules():
         if module.__class__.__name__ == "UniConBlock":
@@ -432,8 +417,8 @@ def set_joint_layer_requires_grad(model: torch.nn.Module, adapter_names, require
     return model
 
 def hack_lora_forward(model: torch.nn.Module):
-    """ Update arguments in patched modules """
-    # For diffusers
+    """ Replace the forward function of LoRA layers """
+
     model = model.unet if hasattr(model, "unet") else model
     for name, module in model.named_modules():
         if isinstance(module, Linear):
@@ -441,8 +426,8 @@ def hack_lora_forward(model: torch.nn.Module):
     return model
 
 def set_joint_attention(model: torch.nn.Module, enable = True, name_filter = None):
-    """ Update arguments in patched modules """
-    # For diffusers
+    """ Set whether to enable the joint cross attention """
+
     model = model.unet if hasattr(model, "unet") else model
     for name, module in model.named_modules():
         if module.__class__.__name__ == "UniConBlock":
@@ -451,8 +436,8 @@ def set_joint_attention(model: torch.nn.Module, enable = True, name_filter = Non
     return model
 
 def set_joint_scale(model: torch.nn.Module, scale = 1.0):
-    """ Update arguments in patched modules """
-    # For diffusers
+    """ Set the scale of joint cross attention """
+
     model = model.unet if hasattr(model, "unet") else model
     for _, module in model.named_modules():
         if module.__class__.__name__ == "UniConBlock":
@@ -460,8 +445,8 @@ def set_joint_scale(model: torch.nn.Module, scale = 1.0):
     return model
 
 def initialize_joint_layers(model: torch.nn.Module, post = "conv"):
-    """ Update arguments in patched modules """
-    # For diffusers
+    """ Initialize all joint cross attentions """
+
     model = model.unet if hasattr(model, "unet") else model
     for _, module in model.named_modules():
         if module.__class__.__name__ == "UniConBlock":
@@ -469,8 +454,8 @@ def initialize_joint_layers(model: torch.nn.Module, post = "conv"):
     return model
 
 def add_post_joint(model: torch.nn.Module, name, post = "conv", add_bias = False, **kwargs):
-    """ Update arguments in patched modules """
-    # For diffusers
+    """ Add a post projection """
+
     model = model.unet if hasattr(model, "unet") else model
     for _, module in model.named_modules():
         if module.__class__.__name__ == "UniConBlock":
@@ -479,7 +464,7 @@ def add_post_joint(model: torch.nn.Module, name, post = "conv", add_bias = False
 
 def set_unicon_config(model: torch.nn.Module, k, v):
     """ Update joint cross attention configurations in patched modules """
-    # For diffusers
+
     model = model.unet if hasattr(model, "unet") else model
     model._unicon_config[k] = v
     return model

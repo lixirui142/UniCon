@@ -32,6 +32,7 @@ def load_model_configs():
         model_configs[model_config["model_name"]] = model_config
     return model_configs
 
+# Load lora adapter and post projection weights of a UniCon model to UNet
 def load_unicon_weights(unet, checkpoint_path, post_joint, model_name = None, adapter_names = ["xy_lora", "yx_lora", "y_lora"]):
 
     active_adapters = []
@@ -69,7 +70,7 @@ def load_unicon_weights(unet, checkpoint_path, post_joint, model_name = None, ad
     return active_adapters
 
 
-
+# Load UniCon model from checkpoint path to UNet
 def load_unicon_to_unet(unet, checkpoint_path, model_name = None, post_joint = "conv"):
 
     patch.apply_patch(unet)
@@ -94,6 +95,7 @@ def load_unicon_pipeline(pipeline_class, base_model_id, vae_id = None):
     print(f"UniCon pipeline loaded. Base model: {base_model_id}")    
     return pipeline
 
+# 1 Load pipeline. 2 Add UniCon to UNet and load weights. 3 Load more UniCon models if any.
 def load_unicon(pipeline_class, model_configs):
     if not isinstance(model_configs, list):
         model_configs = [model_configs]

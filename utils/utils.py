@@ -1,3 +1,4 @@
+import random
 import json
 from datetime import datetime
 import numpy as np
@@ -70,6 +71,26 @@ def get_active_adapters(unet):
             return module.active_adapter
 
 def set_unicon_config_inference(unet, input_pairs, use_cfg = True, batch_size = None, device = "cuda", debug=False):
+    """ Set config for unicon inference.
+        It does two jobs:
+        1. Tell the model how to pair the inputs for joint cross attention.
+            The input_pairs shoule be:
+            [
+                (x_0, y_0, wx_0, wy_0, model_name_0),
+                (x_1, y_1, wx_1, wy_1, model_name_1),
+                ...
+            ]
+            A simple example is [(0,1,1.0,1.0,"depth")], which means the model will pair your 1st and 2nd input (count in batch dimension) for the joint cross attention of depth model. And the attention output will be scaled by 1.0 for both inputs.
+        2. Set masks for LoRA adapters.
+            According to input pairs, we can determine the LoRA masks to let the adapters selectively apply to the inputs.
+            In above simple example [(0,1,1.0,1.0,"depth")], we need masks for depth_y_lora, depth_xy_lora, depth_yx_lora.
+            As x has index 0 and y has index 1, depth_y_lora mask is [False, True].
+            In the joint cross attention, the input is:
+                [x,y] -> Q
+                [y,x] -> K,V
+            So depth_xy_lora mask is (Q: [True, False], K,V: [False, True]) and depth_yx_lora mask is (Q: [False, True], K,V: [True, False]), so that depth_xy_lora apply to x and depth_yx_lora apply to y.
+    """
+
     attn_config = list(zip(*input_pairs)) 
     for i in range(len(attn_config) - 1):
         attn_config[i] = torch.tensor(attn_config[i])
@@ -84,7 +105,6 @@ def set_unicon_config_inference(unet, input_pairs, use_cfg = True, batch_size = 
         model_names = model_names * 2
         # batch_size *= 2
     
-    adapter_names = ["xy_lora", "yx_lora", "y_lora"]
     cond_masks = dict()
     false_mask = [False] * len(model_names)
 
@@ -123,6 +143,19 @@ def set_unicon_config_inference(unet, input_pairs, use_cfg = True, batch_size = 
     return unet
 
 def parse_schedule(sample_schedule, num_inference_step):
+    """ Translate user-friendly schedule to actual sampling schedule.
+        Original sample schedule looks like: [seg0,seg1,...] and each seg is [(l_0,r_0),(l_1,r_1),...,(l_n,r_n),with_guidance].
+        with_guidance: whether to add guidance for inpainting
+        l_i,r_i: an interval in (0,1), will be scaled to (0, N) where N = num_inference_step. It indicates that the i_th input will be denoised from l_i* step to r_i* step in current schedule segment (*: after scaling). 
+        A simple example is [[(0,1),(1,1),False]]. Suppose our input is [x,y]. It means sampling x from step 0 to step N (i.e. from pure noise to clean latent) while keeping y at step N (i.e. clean latent), without guidance.
+        And the translated schedule will be:
+        [
+            (0,N-1,0),
+            (1,N-1,0),
+            ...,
+            (N-1,N-1,0)
+        ]
+    """
     num_inference_step -= 1
     full_schedule = []
     for seg_id, schedule_seg in enumerate(sample_schedule):
