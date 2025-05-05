@@ -72,7 +72,7 @@ def get_active_adapters(unet):
 
 def set_unicon_config_inference(unet, input_pairs, use_cfg = True, batch_size = None, device = "cuda", debug=False):
     """ Set config for unicon inference.
-        It does two jobs:
+        It does two things:
         1. Tell the model how to pair the inputs for joint cross attention.
             The input_pairs shoule be:
             [
@@ -139,6 +139,39 @@ def set_unicon_config_inference(unet, input_pairs, use_cfg = True, batch_size = 
     if debug:
         print("Set attn_config", attn_config)
         print("Set cond masks", cond_masks)
+    
+    return unet
+
+def set_unicon_config_train(unet, input_len, device = "cuda", dtype = torch.float16, debug = False):
+
+    xy_lora = "xy_lora"
+    yx_lora = "yx_lora"
+    xlen = ylen = input_len // 2
+    true_mask = [True] * xlen
+    false_mask = [False] * xlen
+    xy_lora_qo_mask = yx_lora_kv_mask = true_mask + false_mask
+    xy_lora_kv_mask = yx_lora_qo_mask = false_mask + true_mask
+    patch.set_patch_lora_mask(unet, xy_lora, xy_lora_qo_mask, kv_lora_mask = xy_lora_kv_mask)
+    patch.set_patch_lora_mask(unet, yx_lora, yx_lora_qo_mask, kv_lora_mask = yx_lora_kv_mask)
+
+    if debug:
+        print("Set", xy_lora, xy_lora_qo_mask, xy_lora_kv_mask)
+        print("Set", yx_lora, yx_lora_qo_mask, yx_lora_kv_mask)
+
+    y_lora = "y_lora"
+    y_lora_mask = false_mask + true_mask
+    patch.set_patch_lora_mask(unet, y_lora, y_lora_mask)
+    if debug:
+        print("Set", y_lora, y_lora_mask)
+
+    x_ids = torch.arange(xlen).to(device)
+    y_ids = torch.arange(xlen, input_len).to(device)
+    x_weights = torch.ones([1,1,1]).to(device).to(dtype)
+    y_weights = torch.ones([1,1,1]).to(device).to(dtype)
+    attn_config = x_ids, y_ids, x_weights, y_weights
+    patch.set_unicon_config(unet, "attn_config", attn_config)
+    if debug:
+        print("Set attn_config", attn_config)
     
     return unet
 

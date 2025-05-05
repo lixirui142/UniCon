@@ -8,6 +8,7 @@ import torch
 from transformers import AutoProcessor, Blip2ForConditionalGeneration
 from diffusers import StableDiffusionPipeline, AutoencoderKL
 from diffusers import DDIMScheduler, DDPMScheduler, PNDMScheduler, EulerAncestralDiscreteScheduler, EulerDiscreteScheduler, DPMSolverMultistepScheduler
+from datasets import load_dataset
 
 from patch import patch
 from annotator.hed import HEDdetector
@@ -150,3 +151,26 @@ def load_scheduler(pipeline, mode="ddim"):
     elif mode == "dpm":
         scheduler_cls = DPMSolverMultistepScheduler
     pipeline.scheduler = scheduler_cls.from_config(pipeline.scheduler.config)
+
+def load_image_folder(train_data_dir = None, cache_dir = None, dataset_type = None):
+    data_files = {}
+    if train_data_dir is not None:
+        if dataset_type == "json":
+            data_files["train"] = train_data_dir
+        elif dataset_type == "imagefolder": 
+            data_files["train"] = os.path.join(train_data_dir, "**")
+        elif dataset_type == "parquet":
+            data_files["train"] = glob.glob(os.path.join(train_data_dir, "*.parquet"))
+        elif dataset_type == "webdataset":
+            data_files["train"] = glob.glob(os.path.join(train_data_dir, "*.tar"))
+        else:
+            assert False, "Dataset type not defined"
+
+    dataset = load_dataset(
+        dataset_type,
+        data_files=data_files,
+        cache_dir=cache_dir,
+        streaming=True if dataset_type == "webdataset" else False
+    )
+    
+    return dataset

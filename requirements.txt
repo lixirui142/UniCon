@@ -10,3 +10,4 @@ torch==2.1.2
 torchvision==0.16.2
 transformers==4.40.1
 peft==0.10.0
+datasets

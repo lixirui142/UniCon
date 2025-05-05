@@ -7,7 +7,7 @@ from torch import nn
 
 from diffusers.utils import logging
 from peft.tuners.lora.layer import Linear, BaseTunerLayer
-
+import pdb
 
 logger = logging.get_logger(__name__) 
 
@@ -249,13 +249,13 @@ def make_diffusers_unicon_block(block_class: Type[torch.nn.Module]) -> Type[torc
                         attn_output1n_x[cond_mask], attn_output1n_y[cond_mask] = x_post_out, y_post_out
                 
                 # Aggregate output
-                attn_output1n_x *= x_weights
-                attn_output1n_y *= y_weights
+                attn_output1n_x = attn_output1n_x * x_weights
+                attn_output1n_y = attn_output1n_y * y_weights
                 B, N, C = attn_output1n_x.shape
                 x_indexes = x_ids.view(-1,1,1).expand(-1, N, C)
                 y_indexes = y_ids.view(-1,1,1).expand(-1, N, C)
-                output1n.scatter_reduce_(dim = 0, index=x_indexes, src=attn_output1n_x, reduce = "sum")
-                output1n.scatter_reduce_(dim = 0, index=y_indexes, src=attn_output1n_y, reduce = "sum")
+                torch.scatter_reduce(output1n, dim = 0, index=x_indexes, src=attn_output1n_x, reduce = "sum")
+                torch.scatter_reduce(output1n, dim = 0, index=y_indexes, src=attn_output1n_y, reduce = "sum")
                 attn_output = attn_output + output1n * self.joint_scale
             else:
                 attn_output = self.attn1(
