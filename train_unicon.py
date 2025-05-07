@@ -23,6 +23,7 @@ import os
 import random
 import shutil
 from pathlib import Path
+import pdb
 
 import datasets
 import numpy as np
@@ -618,7 +619,6 @@ def main():
     # Load training dataset    
     dataset = load_image_folder(args.train_data_dir, args.cache_dir, args.dataset_type)
 
-    dataset["train"] = dataset["train"].remove_columns([cn for cn in dataset["train"].column_names if (cn not in [*args.y_image_column, *args.x_image_column] and ".png" in cn)])
 
     y_image_column = args.y_image_column
     x_caption_column = args.x_caption_column
@@ -627,6 +627,10 @@ def main():
         
     if y_caption_column is None:
        y_caption_column = x_caption_column
+    
+    train_columns = [*y_image_column, *y_caption_column, *x_image_column, *x_caption_column]
+
+    dataset["train"] = dataset["train"].remove_columns([cn for cn in dataset["train"].column_names if (cn not in train_columns)])
 
     yimage_text_columns = [(i_column, t_column) for i_column, t_column in zip(y_image_column, y_caption_column)]
     ximage_text_columns = [(i_column, t_column) for i_column, t_column in zip(x_image_column, x_caption_column)]
@@ -721,10 +725,9 @@ def main():
             x_images.append(x_image.convert("RGB"))
             y_images.append(y_image.convert("RGB"))
         
-        pad_num = len(examples[x_image_column]) - len(x_images)
-        x_images = x_images + x_images[-1:] * pad_num
-        y_images = y_images + y_images[-1:] * pad_num
-        # pdb.set_trace()
+        # pad_num = len(examples[x_image_column]) - len(x_images)
+        # x_images = x_images + x_images[-1:] * pad_num
+        # y_images = y_images + y_images[-1:] * pad_num
 
         if args.separate_xy_trans:
             x_images = [train_transforms(x_image) for x_image in x_images]
@@ -774,7 +777,6 @@ def main():
         
 
     def collate_fn(examples):
-        # pdb.set_trace()
         x_pixel_values = torch.stack([example["x_pixel_values"] for example in examples])
         x_pixel_values = x_pixel_values.to(memory_format=torch.contiguous_format).float()
         y_pixel_values = torch.stack([example["y_pixel_values"] for example in examples])

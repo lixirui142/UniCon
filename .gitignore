@@ -8,3 +8,5 @@ annotator/ckpts
 .ipynb_checkpoints
 __pycache__
 
+data/PascalVOC
+wandb/
