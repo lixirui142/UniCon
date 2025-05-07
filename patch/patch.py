@@ -254,8 +254,8 @@ def make_diffusers_unicon_block(block_class: Type[torch.nn.Module]) -> Type[torc
                 B, N, C = attn_output1n_x.shape
                 x_indexes = x_ids.view(-1,1,1).expand(-1, N, C)
                 y_indexes = y_ids.view(-1,1,1).expand(-1, N, C)
-                torch.scatter_reduce(output1n, dim = 0, index=x_indexes, src=attn_output1n_x, reduce = "sum")
-                torch.scatter_reduce(output1n, dim = 0, index=y_indexes, src=attn_output1n_y, reduce = "sum")
+                output1n = torch.scatter_reduce(output1n, dim = 0, index=x_indexes, src=attn_output1n_x, reduce = "sum")
+                output1n = torch.scatter_reduce(output1n, dim = 0, index=y_indexes, src=attn_output1n_y, reduce = "sum")
                 attn_output = attn_output + output1n * self.joint_scale
             else:
                 attn_output = self.attn1(
