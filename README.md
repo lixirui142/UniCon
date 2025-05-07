@@ -35,9 +35,24 @@ We provide a [gradio demo](gradio_unicon.py) to showcase the usage of UniCon mod
 python gradio_unicon.py
 ```
 
+### Train
+
+To train UniCon Depth, Edge and Pose model on PascalVOC, first download and annotate the PascalVOC dataset:
+```shell
+bash train/download_pascal.sh
+python annotate_pascal.py
+```
+It will download the dataset to [data dir](data) and generate condition maps and captions. Some json files are created to save the dataset information. Then run the training script:
+```shell
+bash train/train_unicon_depth.sh
+bash train/train_unicon_hed.sh
+bash train/train_unicon_pose.sh
+```
+It costs about 13 hours to train one model on single NVIDIA A100 80G. You can run `python train_unicon.py --help` to check available training parameters.
+
 ## TODO
 - [ ] Provide notebooks and python scripts for more inference cases.
-- [ ] Clean and release training code.
+- [x] Clean and release training code.
 
 ## Citation
 
