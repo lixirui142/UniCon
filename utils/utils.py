@@ -10,6 +10,9 @@ from peft.tuners.lora.layer import BaseTunerLayer
 from transformers import AutoProcessor, Blip2ForConditionalGeneration
 
 from patch import patch
+from utils.load_utils import load_scheduler
+
+import pdb
 
 def normalize_image(image):
     return (image - 0.5) / 0.5
@@ -65,12 +68,24 @@ def seed_everything(seed):
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-def get_active_adapters(unet):
-    for _, module in unet.named_modules():
-        if isinstance(module, BaseTunerLayer):
-            return module.active_adapter
+def get_adapter_names(unet, models = None):
+    unicon_adapters = unet.unicon_config["unicon_adapters"]
+    models = unicon_adapters.keys() if models is None else models
+    adapter_names = []
+    for model_name in models:
+        adapter_names += unicon_adapters[model_name]
+    return adapter_names
 
-def set_unicon_config_inference(unet, input_pairs, use_cfg = True, batch_size = None, device = "cuda", debug=False):
+def set_unicon_infer_adapters(unet, adapters):
+    
+    if "active_adapters" not in unet.unicon_config or set(adapters) != set(unet.unicon_config["active_adapters"]):
+        unet.unicon_config["active_adapters"] = adapters
+        unet.set_adapters(adapters)
+        for name, param in unet.named_parameters():
+            param.requires_grad = False
+    
+
+def set_unicon_config_inference(unet, input_pairs, use_cfg = True, input_len = None, device = "cuda", debug=False):
     """ Set config for unicon inference.
         It does two things:
         1. Tell the model how to pair the inputs for joint cross attention.
@@ -81,8 +96,8 @@ def set_unicon_config_inference(unet, input_pairs, use_cfg = True, batch_size = 
                 ...
             ]
             A simple example is [(0,1,1.0,1.0,"depth")], which means the model will pair your 1st and 2nd input (count in batch dimension) for the joint cross attention of depth model. And the attention output will be scaled by 1.0 for both inputs.
-        2. Set masks for LoRA adapters.
-            According to input pairs, we can determine the LoRA masks to let the adapters selectively apply to the inputs.
+        2. Set active LoRA adapters and their masks.
+            According to input pairs, we can determine which LoRA adapters to use. Then set their masks so that the adapters can selectively apply to the inputs.
             In above simple example [(0,1,1.0,1.0,"depth")], we need masks for depth_y_lora, depth_xy_lora, depth_yx_lora.
             As x has index 0 and y has index 1, depth_y_lora mask is [False, True].
             In the joint cross attention, the input is:
@@ -99,8 +114,8 @@ def set_unicon_config_inference(unet, input_pairs, use_cfg = True, batch_size = 
     y_weights = y_weights.view(-1, 1, 1)
 
     if use_cfg:
-        x_ids = torch.cat([x_ids, x_ids + batch_size])
-        y_ids = torch.cat([y_ids, y_ids + batch_size])
+        x_ids = torch.cat([x_ids, x_ids + input_len])
+        y_ids = torch.cat([y_ids, y_ids + input_len])
         x_weights, y_weights = torch.cat([x_weights] * 2), torch.cat([y_weights] * 2)
         model_names = model_names * 2
         # batch_size *= 2
@@ -108,8 +123,12 @@ def set_unicon_config_inference(unet, input_pairs, use_cfg = True, batch_size = 
     cond_masks = dict()
     false_mask = [False] * len(model_names)
 
-    input_len = batch_size * 2 if use_cfg else batch_size
-    active_adapters = get_active_adapters(unet)
+    input_len = input_len * 2 if use_cfg else input_len
+    
+    active_adapters = get_adapter_names(unet, set(model_names))
+    set_unicon_infer_adapters(unet, active_adapters)
+
+    
     for cur_cond in set(model_names):
         cond_masks[cur_cond] = [model_name == cur_cond for model_name in model_names]
         xy_lora = f"{cur_cond}_xy_lora"
@@ -118,7 +137,7 @@ def set_unicon_config_inference(unet, input_pairs, use_cfg = True, batch_size = 
         xy_lora_kv_mask = yx_lora_qo_mask = false_mask + cond_masks[cur_cond]
         patch.set_patch_lora_mask(unet, xy_lora, xy_lora_qo_mask, kv_lora_mask = xy_lora_kv_mask)
         patch.set_patch_lora_mask(unet, yx_lora, yx_lora_qo_mask, kv_lora_mask = yx_lora_kv_mask)
-
+        
         if debug:
             print("Set", xy_lora, xy_lora_qo_mask, xy_lora_kv_mask)
             print("Set", yx_lora, yx_lora_qo_mask, yx_lora_kv_mask)
@@ -132,10 +151,11 @@ def set_unicon_config_inference(unet, input_pairs, use_cfg = True, batch_size = 
             patch.set_patch_lora_mask(unet, y_lora, y_lora_mask)
             if debug:
                 print("Set", y_lora, y_lora_mask)
+            
 
     attn_config = x_ids.to(device), y_ids.to(device), x_weights.to(device), y_weights.to(device)
-    patch.set_unicon_config(unet, "attn_config", attn_config)
-    patch.set_unicon_config(unet, "cond_masks", cond_masks)
+    unet.unicon_config["attn_config"] = attn_config
+    unet.unicon_config["cond_masks"] = cond_masks
     if debug:
         print("Set attn_config", attn_config)
         print("Set cond masks", cond_masks)
@@ -275,6 +295,64 @@ def process_images(images, h = None, w = None, verbose = False, div = None, rand
     else:
         return torch.stack(image_ls)
 
+
+def repeat_interleave(ls, num_repeats):
+
+    return sum([[ls[i]] * num_repeats for i in range(len(ls))], start = [])
+
+def unicon_infer(pipeline, input_config, prompt = "", negative_prompt = "", height = 512, width = 512, batch_size = 1, num_inference_step = 50, seed = None, scheduler_selection = "ead", guidance_scale = 7.5, joint_scale = 1.0, cond_guidance_scale = 0.0, debug = False):
+
+    init_images = input_config["input_images"]
+
+    if "image_masks" in input_config:
+        masks = input_config["image_masks"]
+    else:
+        mask = Image.new('RGB', (width, height), (255, 255, 255))
+        masks = [mask] * len(init_images)
+
+    num_input = len(init_images)
+    prompts = prompt if isinstance(prompt, list) else [prompt] * num_input
+    negative_prompts = negative_prompt if isinstance(negative_prompt, list) else [negative_prompt] * num_input
+
+    init_images, masks = repeat_interleave(init_images, batch_size), repeat_interleave(masks, batch_size)
+    prompts, negative_prompts = repeat_interleave(prompts, batch_size), repeat_interleave(negative_prompts, batch_size)
+
+    input_pairs = []
+    for input_pair in input_config["input_pairs"]:
+        x_id, y_id, x_wt, y_wt, mn = input_pair
+        input_pairs += [(x_id * batch_size + i, y_id * batch_size + i, x_wt, y_wt, mn) for i in range(batch_size)]
+
+    set_unicon_config_inference(pipeline.unet, input_pairs, input_len = len(init_images), debug=debug)
+    load_scheduler(pipeline, mode = scheduler_selection)
+
+    generator = torch.Generator(device="cuda").manual_seed(seed) if seed is not None else None
+
+    sample_schedule = parse_schedule(input_config["sample_schedule"], num_inference_step)
+
+    pipeline.to("cuda")
+
+    inference_kwargs = {
+        "prompt" : prompts,
+        "image" : init_images,
+        "mask_image" : masks,
+        "height" : height,
+        "width" : width,
+        "num_inference_steps" : num_inference_step,
+        "guidance_scale" : guidance_scale,
+        "negative_prompt" : negative_prompts,
+        "eta" : 1.0,
+        "sample_schedule" : sample_schedule,
+        "cond_guidance_scale" : cond_guidance_scale,
+        "xlen" : batch_size,
+        "generator":generator,
+    }
+
+    # pdb.set_trace()
+    with torch.no_grad():
+        with torch.autocast(device_type = "cuda", dtype = torch.float16):
+            images = pipeline(**inference_kwargs).images
+        
+    return images
 
 # ToTensor = transforms.Compose(
 #                 [

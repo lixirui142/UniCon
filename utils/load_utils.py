@@ -8,13 +8,14 @@ import torch
 from transformers import AutoProcessor, Blip2ForConditionalGeneration
 from diffusers import StableDiffusionPipeline, AutoencoderKL
 from diffusers import DDIMScheduler, DDPMScheduler, PNDMScheduler, EulerAncestralDiscreteScheduler, EulerDiscreteScheduler, DPMSolverMultistepScheduler
+
 from datasets import load_dataset
+
 
 from patch import patch
 from annotator.hed import HEDdetector
 from annotator.depth_anything_v2 import DepthAnythingV2Detector
 from annotator.openpose import OpenposeDetector
-from utils.utils import get_active_adapters
 
 model_config_root = "config/model_config"
 
@@ -59,28 +60,22 @@ def load_unicon_weights(unet, checkpoint_path, post_joint, model_name = None, ad
     # Deal with training weight name
     state_dict = {key.replace("conv1n", f"post1n.{model_name}"): value for key, value in state_dict.items()}
     missing_keys, unexpected_keys = unet.load_state_dict(state_dict, strict=False)
-    
 
-    if hasattr(unet, "unicon_adapters"):
-        unet.unicon_adapters[model_name] = active_adapters
-    else:
-        unet.unicon_adapters = {model_name:active_adapters}
+    patch.update_unicon_config(unet, "unicon_adapters", {model_name:active_adapters})
 
     print(model_name, "model weights loaded")
     
     return active_adapters
 
 
+
 # Load UniCon model from checkpoint path to UNet
 def load_unicon_to_unet(unet, checkpoint_path, model_name = None, post_joint = "conv"):
-
     patch.apply_patch(unet)
     patch.initialize_joint_layers(unet, post = post_joint)
     print("UniCon layers initialized.")
 
-    active_adapters = load_unicon_weights(unet, checkpoint_path, post_joint, model_name = model_name)
-
-    unet.set_adapters(active_adapters)
+    load_unicon_weights(unet, checkpoint_path, post_joint, model_name = model_name)
     patch.hack_lora_forward(unet)
 
     return unet
@@ -110,17 +105,17 @@ def load_unicon(pipeline_class, model_configs):
     post_joint = model_config["post_joint"]
     pipeline.unet = load_unicon_to_unet(pipeline.unet, checkpoint_path, model_name = model_name, post_joint = post_joint)
 
-
-    active_adapters = get_active_adapters(pipeline.unet)
     for model_config in model_configs[1:]:
-        checkpoint_path = model_config["checkpoint_path"]
-        model_name = model_config["model_name"]
-        post_joint = model_config["post_joint"]
-        active_adapters += load_unicon_weights(pipeline.unet, checkpoint_path, post_joint, model_name = model_name)
-    
-    pipeline.unet.set_adapters(active_adapters)
+        load_one(pipeline.unet, model_config)
 
     return pipeline
+
+def load_one(unet, model_config):
+    checkpoint_path = model_config["checkpoint_path"]
+    model_name = model_config["model_name"]
+    post_joint = model_config["post_joint"]
+    load_unicon_weights(unet, checkpoint_path, post_joint, model_name = model_name)
+
 
 def load_blip_processor():
     # blip_processor = BlipProcessor.from_pretrained(

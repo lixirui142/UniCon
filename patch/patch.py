@@ -7,7 +7,7 @@ from torch import nn
 
 from diffusers.utils import logging
 from peft.tuners.lora.layer import Linear, BaseTunerLayer
-import pdb
+
 
 logger = logging.get_logger(__name__) 
 
@@ -220,7 +220,7 @@ def make_diffusers_unicon_block(block_class: Type[torch.nn.Module]) -> Type[torc
                 batch_size = joint_norm_hidden_states.shape[0]
                 
                 # Get paired joint cross attention inputs
-                x_ids, y_ids, x_weights, y_weights = self._unicon_config["attn_config"]
+                x_ids, y_ids, x_weights, y_weights = self.unicon_config["attn_config"]
                 input_ids = torch.cat([x_ids, y_ids])
                 joint_ids = torch.cat([y_ids, x_ids])
                 input_norm_hidden_states = joint_norm_hidden_states[input_ids]
@@ -238,19 +238,19 @@ def make_diffusers_unicon_block(block_class: Type[torch.nn.Module]) -> Type[torc
                 output1n = torch.zeros_like(attn_output)
 
                 attn_output1n_x, attn_output1n_y = attn_output1n.chunk(2, dim = 0)
-                is_train = self._unicon_config["train"]
+                is_train = self.unicon_config["train"]
                 if is_train:
                     attn_output1n_x, attn_output1n_y = self.post_proj(attn_output1n_x, attn_output1n_y, self.conv1n, self.post)
                 else:
-                    cond_masks = self._unicon_config["cond_masks"]
+                    cond_masks = self.unicon_config["cond_masks"]
                     for cur_cond, cond_mask in cond_masks.items():
                         # cond_mask = [model_name == cur_cond for model_name in model_names]
                         x_post_out, y_post_out = self.post_proj(attn_output1n_x[cond_mask], attn_output1n_y[cond_mask], self.post1n[cur_cond], self.post_type[cur_cond])
                         attn_output1n_x[cond_mask], attn_output1n_y[cond_mask] = x_post_out, y_post_out
                 
                 # Aggregate output
-                attn_output1n_x = attn_output1n_x * x_weights
-                attn_output1n_y = attn_output1n_y * y_weights
+                attn_output1n_x = attn_output1n_x * x_weights.to(attn_output1n_x)
+                attn_output1n_y = attn_output1n_y * y_weights.to(attn_output1n_y)
                 B, N, C = attn_output1n_x.shape
                 x_indexes = x_ids.view(-1,1,1).expand(-1, N, C)
                 y_indexes = y_ids.view(-1,1,1).expand(-1, N, C)
@@ -363,7 +363,7 @@ def apply_patch(
 
     diffusion_model = model.unet if hasattr(model, "unet") else model
 
-    diffusion_model._unicon_config = {
+    diffusion_model.unicon_config = {
         "train": train,
     }
     make_unicon_block_fn = make_diffusers_unicon_block
@@ -373,7 +373,7 @@ def apply_patch(
             continue
         if isinstance_str(module, "BasicTransformerBlock"):
             module.__class__ = make_unicon_block_fn(module.__class__)
-            module._unicon_config = diffusion_model._unicon_config
+            module.unicon_config = diffusion_model.unicon_config
 
     return model
 
@@ -462,12 +462,17 @@ def add_post_joint(model: torch.nn.Module, name, post = "conv", add_bias = False
             module.add_post_joint(name, post, add_bias)
     return model
 
-def set_unicon_config(model: torch.nn.Module, k, v):
+def update_unicon_config(model: torch.nn.Module, k, v):
     """ Update joint cross attention configurations in patched modules """
 
     model = model.unet if hasattr(model, "unet") else model
-    model._unicon_config[k] = v
-    return model
+    if k in model.unicon_config:
+        if isinstance(model.unicon_config[k], dict):
+            model.unicon_config[k].update(v)
+        else:
+            model.unicon_config[k] += v
+    else:
+        model.unicon_config[k] = v
 
 def zero_module(module):
     for p in module.parameters():

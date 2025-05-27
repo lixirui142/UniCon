@@ -35,6 +35,9 @@ We provide a [gradio demo](gradio_unicon.py) to showcase the usage of UniCon mod
 python gradio_unicon.py
 ```
 
+### Notebook Demo
+We provide a [jupyter notebook demo](inference_unicon.ipynb) to introduce how to load, set and infer with UniCon models.
+
 ### Train
 
 To train UniCon Depth, Edge and Pose model on PascalVOC, first download and annotate the PascalVOC dataset:
@@ -51,7 +54,7 @@ bash train/train_unicon_pose.sh
 It costs about 13 hours to train one model on single NVIDIA A100 80G. You can run `python train_unicon.py --help` to check available training parameters.
 
 ## TODO
-- [ ] Provide notebooks and python scripts for more inference cases.
+- [x] Provide notebooks and python scripts for more inference cases.
 - [x] Clean and release training code.
 
 ## Citation

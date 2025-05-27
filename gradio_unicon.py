@@ -10,9 +10,11 @@ import gradio as gr
 
 from patch import patch
 from pipeline.pipeline_unicon import StableDiffusionUniConPipeline
-from utils.utils import blip2_cap, get_combined_filename, save_png_with_comment, set_unicon_config_inference, parse_schedule, process_images
+from utils.utils import blip2_cap, get_combined_filename, save_png_with_comment, set_unicon_config_inference, parse_schedule, process_images, unicon_infer
 from utils.load_utils import load_model_configs, load_unicon, load_blip_processor, load_annotator, annotator_dict, load_unicon_weights, load_scheduler
 from annotator.util import HWC3
+
+import pdb
 
 model_configs = load_model_configs()
 cur_model = "depth"
@@ -85,7 +87,8 @@ def process(image_input, cond_input, prompt, model_selection, additional_prompt,
         pipe = load_unicon(pipeline_class, model_configs[cur_model])
     elif cur_model != model_selection:
         cur_model = model_selection
-        if cur_model not in pipe.unet.unicon_adapters:
+        unicon_adapters = pipe.unet.unicon_config["unicon_adapters"]
+        if cur_model not in unicon_adapters:
             model_config = model_configs[cur_model]
             checkpoint_path = model_config["checkpoint_path"]
             model_name = model_config["model_name"]
@@ -93,8 +96,7 @@ def process(image_input, cond_input, prompt, model_selection, additional_prompt,
             adapter_names = model_config["adapter_names"]
             active_adapters = load_unicon_weights(pipe.unet, checkpoint_path, post_joint, model_name = model_name, adapter_names = adapter_names)
         else:
-            active_adapters = pipe.unet.unicon_adapters[cur_model]
-        pipe.unet.set_adapters(active_adapters)
+            active_adapters = unicon_adapters[cur_model]
     
     model_config = model_configs[cur_model]
     
@@ -106,72 +108,35 @@ def process(image_input, cond_input, prompt, model_selection, additional_prompt,
         cond_input = Image.new('RGB', (width, height), (255, 255, 255))
     else:
         cond_input = Image.open(cond_input).convert("RGB")
+
+    init_images = [image_input,  cond_input]
+    init_images = [process_images([init_image], height, width,  verbose = debug, div = 8)[0] for init_image in init_images]
     
-    image_mask = Image.new('RGB', (width, height), (255, 255, 255))
-    cond_mask = Image.new('RGB', (width, height), (255, 255, 255))
+    sample_schedule = [[(1 - image_noise_strength, 1), (1 - cond_noise_strength, 1), 0]]
+    input_pairs = [(0, 1, joint_scale, joint_scale, cur_model)]
 
-    with torch.no_grad():
+    input_config = {
+        "input_images" : init_images,
+        "sample_schedule" : sample_schedule,
+        "input_pairs": input_pairs
+    }
 
-        init_images = [image_input,  cond_input]
-        init_images = [process_images([init_image], height, width,  verbose = debug, div = 8)[0] for init_image in init_images]
+    prompt = additional_prompt + prompt
+    y_prompt = prompt if y_prompt == "None" else additional_prompt + y_prompt
 
-        init_images = [init_images[0]] * batch_size + [init_images[1]] * batch_size
+    trigger_word = model_config["trigger_word"]
+    prompts = [prompt, trigger_word + y_prompt]
 
-        masks = [image_mask] * batch_size + [cond_mask] * batch_size
+    if negative_prompt is not None:
+        negative_prompts = [negative_prompt] * 2
+    
+    patch.set_joint_attention(pipe.unet, enable = enable_joint_attn)
 
-        sample_schedule = [[(1 - image_noise_strength, 1), (1 - cond_noise_strength, 1), 0]]
+    images = unicon_infer(pipe, input_config, prompt = prompts, negative_prompt = negative_prompts, height = height, width = width, batch_size = batch_size, num_inference_step = num_inference_step, seed = seed, scheduler_selection = scheduler_selection, guidance_scale = guidance_scale, joint_scale = joint_scale, cond_guidance_scale = cond_guidance_scale, debug = False)
 
-        num_input = batch_size * 2
-
-        inputs_config = {
-            "num_input": num_input,
-            "schedules": sample_schedule,
-            "pairs": [(i, i+batch_size, joint_scale, joint_scale, cur_model) for i in range(batch_size)]
-        }
-        set_unicon_config_inference(pipe.unet, inputs_config["pairs"], batch_size = inputs_config["num_input"], debug=debug)
-        load_scheduler(pipe, mode = scheduler_selection)
-
-        generator = torch.Generator(device="cuda")
-        generator = generator.manual_seed(seed)
-
-
-        prompt = additional_prompt + prompt
-        y_prompt = prompt if y_prompt == "None" else additional_prompt + y_prompt
-
-        if negative_prompt is not None:
-            negative_prompts = [negative_prompt] * num_input
-
-        trigger_word = model_config["trigger_word"]
-        prompts = [prompt if i < batch_size else trigger_word + y_prompt for i in range(num_input)]
-        sample_schedule = parse_schedule(inputs_config["schedules"], num_inference_step)
-        patch.set_joint_attention(pipe.unet, enable = enable_joint_attn)
-
-        pipe.to("cuda")
-
-        inference_config = {
-            "prompt" : prompts,
-            "image" : init_images,
-            "mask_image" : masks,
-            "height" : height,
-            "width" : width,
-            "num_inference_steps" : num_inference_step,
-            "guidance_scale" : guidance_scale,
-            "strength" : 1.0,
-            "negative_prompt" : negative_prompts,
-            "eta" : 1.0,
-            "sample_schedule" : sample_schedule,
-            "cond_guidance_scale" : cond_guidance_scale,
-            "xlen" : batch_size,
-            "generator":generator,
-        }
-
-
-        with torch.autocast(device_type = "cuda", dtype = torch.float16):
-            images = pipe(**inference_config).images
-
-
-        image_grid = make_image_grid([*init_images, *images], rows=2, cols=batch_size * 2)
-        save_path = save_png_with_comment(image_grid, metadata, os.path.join(save_dir, get_combined_filename()))
+    input_images = [init_images[0]] * batch_size + [init_images[1]] * batch_size
+    image_grid = make_image_grid([*input_images, *images], rows=2, cols=batch_size * 2)
+    save_path = save_png_with_comment(image_grid, metadata, os.path.join(save_dir, get_combined_filename()))
 
     # return image_grid, images[:batch_size], images[batch_size:]
     return [image_grid, *images]

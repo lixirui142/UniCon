@@ -1290,7 +1290,6 @@ class StableDiffusionUniConPipeline(
         mask_condition = self.mask_processor.preprocess(
             mask_image, height=height, width=width, resize_mode=resize_mode, crops_coords=crops_coords
         )
-
         if masked_image_latents is None:
             masked_image = init_image * (mask_condition < 0.5)
         else:
@@ -1437,10 +1436,12 @@ class StableDiffusionUniConPipeline(
                 
                 # replace each input latents with init latents in mask area
                 init_latents_proper = image_latents
-                if self.do_classifier_free_guidance:
-                    init_mask, _ = mask.chunk(2)
-                else:
-                    init_mask = mask
+                
+                # if self.do_classifier_free_guidance:
+                #     init_mask, _ = mask.chunk(2)
+                # else:
+                init_mask = mask
+                
                 for k in range(num_input):
                     le, ri = xlen * k, xlen * (k + 1)
                     step = cur_steps[k]
