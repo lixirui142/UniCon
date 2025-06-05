@@ -114,7 +114,8 @@ def load_one(unet, model_config):
     checkpoint_path = model_config["checkpoint_path"]
     model_name = model_config["model_name"]
     post_joint = model_config["post_joint"]
-    load_unicon_weights(unet, checkpoint_path, post_joint, model_name = model_name)
+    if "unicon_adapters" not in unet.unicon_config or model_name not in unet.unicon_config["unicon_adapters"]:
+        load_unicon_weights(unet, checkpoint_path, post_joint, model_name = model_name)
 
 
 def load_blip_processor():

@@ -915,6 +915,7 @@ class StableDiffusionUniConPipeline(
 
         return timesteps, num_inference_steps - t_start
 
+
     # Copied from diffusers.pipelines.latent_consistency_models.pipeline_latent_consistency_text2img.LatentConsistencyModelPipeline.get_guidance_scale_embedding
     def get_guidance_scale_embedding(self, w, embedding_dim=512, dtype=torch.float32):
         """
@@ -1338,7 +1339,8 @@ class StableDiffusionUniConPipeline(
         schedulers = []
         for k in range(num_input):
             step_init = sample_schedule[0][k]
-            cur_scheduler = copy.deepcopy(self.scheduler)
+            cur_scheduler = self.scheduler.__class__.from_config(self.scheduler.config)
+            cur_scheduler.set_timesteps(num_inference_steps, device=device)
             schedulers.append(cur_scheduler)
             if step_init != 0:
                 if hasattr(cur_scheduler, "_step_index"):
@@ -1434,23 +1436,27 @@ class StableDiffusionUniConPipeline(
                         t = cur_t[k]
                         latents[le:ri] = schedulers[k].step(noise_pred[le:ri], t, latents[le:ri], **extra_step_kwargs, return_dict=False)[0]
                 
+
+                # pdb.set_trace()
                 # replace each input latents with init latents in mask area
-                init_latents_proper = image_latents
+                init_latents_proper = image_latents.clone()
                 
                 # if self.do_classifier_free_guidance:
                 #     init_mask, _ = mask.chunk(2)
                 # else:
                 init_mask = mask
                 
+                
                 for k in range(num_input):
                     le, ri = xlen * k, xlen * (k + 1)
                     step = cur_steps[k]
                     if step < len(timesteps) - 1:
                         noise_timestep = timesteps[step + 1]
-                        init_latents_proper[le:ri] = self.scheduler.add_noise(
-                            image_latents[le:ri], noise[le:ri], torch.tensor([noise_timestep])
+                        init_latents_proper[le:ri] = cur_scheduler.add_noise(
+                            init_latents_proper[le:ri], noise[le:ri], torch.tensor([noise_timestep])
                         )
 
+                # pdb.set_trace
                 latents = (1 - init_mask) * init_latents_proper + init_mask * latents
                  
                 if callback_on_step_end is not None:
