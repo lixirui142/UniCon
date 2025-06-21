@@ -62,10 +62,10 @@ It costs about 13 hours to train one model on single NVIDIA A100 80G. You can ru
 If you find this work useful for your research, please consider citing our paper:
 
 ```bibtex
-@article{li2024unicon,
+@inproceedings{li2024unicon,
     title={A Simple Approach to Unifying Diffusion-based Conditional Generation},
     author={Li, Xirui and Herrmann, Charles and Chan, Kelvin CK and Li, Yinxiao and Sun, Deqing and Yang, Ming-Hsuan},
-    booktitle={arXiv preprint arxiv:2410.11439},
-    year={2024}
+    booktitle={The Thirteenth International Conference on Learning Representations}
+    year={2025}
     }
 ```
