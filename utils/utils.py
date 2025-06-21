@@ -189,7 +189,7 @@ def set_unicon_config_train(unet, input_len, device = "cuda", dtype = torch.floa
     x_weights = torch.ones([1,1,1]).to(device).to(dtype)
     y_weights = torch.ones([1,1,1]).to(device).to(dtype)
     attn_config = x_ids, y_ids, x_weights, y_weights
-    patch.set_unicon_config(unet, "attn_config", attn_config)
+    unet.unicon_config["attn_config"] = attn_config
     if debug:
         print("Set attn_config", attn_config)
     
